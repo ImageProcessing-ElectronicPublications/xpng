@@ -1,4 +1,4 @@
-/* gcc main.c -o xpng -lpng */
+/* gcc xpng.c -o xpng -lpng -lm*/
 /* Requires libpng and zlib */
 
 #include <stddef.h>
@@ -24,7 +24,8 @@ png_bytep pix(int32_t i, int32_t j, int c, png_bytep data)
 /* Returns the difference between two bytes for error calculation */
 uint8_t err(png_byte x1, png_byte x2)
 {
-    uint8_t a1 = x1; uint8_t a2 = x2;
+    uint8_t a1 = x1;
+    uint8_t a2 = x2;
     return a1 > a2 ? a1 - a2 : a2 - a1;
 }
 
@@ -33,7 +34,7 @@ png_byte avg(int32_t i, int32_t j, int c, png_bytep data)
 {
     png_byte left = 0;
     png_byte up = 0;
-    
+
     if (i > 0) up = *pix(i-1,j,c,data);
     if (j > 0) left = *pix(i,j-1,c,data);
 
@@ -63,7 +64,7 @@ png_byte paeth(int32_t i, int32_t j, int c, png_bytep data)
     png_byte left = 0;
     png_byte up = 0;
     png_byte topleft = 0;
-    
+
     if (i > 0) up = *pix(i-1,j,c,data);
     if (j > 0) left = *pix(i,j-1,c,data);
     if (i > 0 && j > 0) topleft = *pix(i-1,j-1,c,data);
@@ -73,7 +74,7 @@ png_byte paeth(int32_t i, int32_t j, int c, png_bytep data)
     p -= topleft;
     if (p < 0) p = 0;
     if (p > 255) p = 255;
-    
+
     uint8_t dist = 0;
     png_byte base;
 
@@ -109,7 +110,7 @@ png_byte calc_noise(int32_t i, int32_t j, int32_t c, png_bytep data)
             {
                 X += *pix(ii, jj, c, data);
                 X2 += *pix(ii, jj, c, data) *
-                     *pix(ii, jj, c, data);
+                      *pix(ii, jj, c, data);
                 N += 1;
             }
         }
@@ -120,25 +121,25 @@ png_byte calc_noise(int32_t i, int32_t j, int32_t c, png_bytep data)
 int main(int argc, const char **argv)
 {
     if (argc != 4)
-	{
-		fprintf(stderr, "xpng: usage: xpng inputfile outputfile level\n");
-		exit(1);
-	}
-	
-	unsigned int clevel = atoi(argv[3]);
-	png_image image; /* The control structure used by libpng */
+    {
+        fprintf(stderr, "xpng: usage: xpng inputfile outputfile level\n");
+        exit(1);
+    }
 
-	/* Initialize png_image structure */
-	memset(&image, 0, (sizeof image));
-	image.version = PNG_IMAGE_VERSION;
+    unsigned int clevel = atoi(argv[3]);
+    png_image image; /* The control structure used by libpng */
 
-	/* The first argument is the input file */
-	if (png_image_begin_read_from_file(&image, argv[1]) == 0)
-	{
+    /* Initialize png_image structure */
+    memset(&image, 0, (sizeof image));
+    image.version = PNG_IMAGE_VERSION;
+
+    /* The first argument is the input file */
+    if (png_image_begin_read_from_file(&image, argv[1]) == 0)
+    {
         fprintf(stderr, "xpng: error: %s\n", image.message);
         exit (1);
     }
-    
+
     png_bytep buffer; /* Buffer for original image */
     png_bytep buffer2; /* Output image buffer */
     png_bytep diff; /* Residuals from predictor */
@@ -150,25 +151,25 @@ int main(int argc, const char **argv)
     buffer2 = malloc(PNG_IMAGE_SIZE(image));
     diff = malloc(PNG_IMAGE_SIZE(image));
     noise = malloc(PNG_IMAGE_SIZE(image));
-    
+
 
     if (buffer == NULL || buffer2 == NULL || diff == NULL || noise == NULL)
     {
         fprintf(stderr, "xpng: error: insufficient memory\n");
         exit(1);
     }
-    
+
     memset(buffer, 0, PNG_IMAGE_SIZE(image));
     memset(buffer2, 0, PNG_IMAGE_SIZE(image));
 
     if (buffer == NULL ||
-        png_image_finish_read(&image, NULL/*bg*/, buffer,
-        0/*row_stride*/, NULL/*colormap*/) == 0)
+            png_image_finish_read(&image, NULL/*bg*/, buffer,
+                                  0/*row_stride*/, NULL/*colormap*/) == 0)
     {
         fprintf(stderr, "xpng: error: %s\n", image.message);
         exit (1);
     }
-       
+
     h = image.height;
     w = image.width;
 
@@ -193,7 +194,7 @@ int main(int argc, const char **argv)
             freq[(uint8_t)i] = jumpsize;
         }
     }
-    
+
     /* Go through image and adaptively quantize for noise masking */
     for (int32_t i = 0; i < h; i++)
     {
@@ -204,7 +205,7 @@ int main(int argc, const char **argv)
             {
                 png_byte target; /* Target value */
                 png_byte base; /* Output from predictor */
-                
+
                 /* Left predictor for first row, avg. for others */
                 if (i == 0 && j > 0)
                 {
@@ -219,7 +220,7 @@ int main(int argc, const char **argv)
 
                 /* Calculate tolerance using comp. level and local noise */
                 uint8_t delta = clevel
-                              + (uint16_t) *pix(i,j,c,noise)*clevel/(10+clevel);
+                                + (uint16_t) *pix(i,j,c,noise)*clevel/(10+clevel);
 
                 /* Calculate interval based on tolerance */
                 png_byte ltarget = 0;
@@ -240,7 +241,8 @@ int main(int argc, const char **argv)
                         approx = a;
                         f = freq[d];
                     }
-                } while (a++ != rtarget);
+                }
+                while (a++ != rtarget);
 
                 *pix(i,j,c,diff) = approx-base;
                 /*freq[*pix(i,j,c,diff)]++;*/
@@ -254,10 +256,10 @@ int main(int argc, const char **argv)
                     *pix(i,j,c,buffer2) = base + *pix(i,j,c,diff);
                     continue;
                 }
-                for (size_t rd=1; rd<=j*3+c && rd<=4;rd++)
+                for (size_t rd=1; rd<=j*3+c && rd<=4; rd++)
                 {
                     if (err(target,base+*(pix(i,j,c,diff)-rd))
-                        < delta)
+                            < delta)
                     {
                         refdist = rd;
                         *pix(i,j,c,diff) = *(pix(i,j,c,diff)-rd);
@@ -269,7 +271,7 @@ int main(int argc, const char **argv)
         }
     }
     if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
-        buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
+                                buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
     {
         fprintf(stderr, "xpng: error: %s\n", image.message);
         exit (1);

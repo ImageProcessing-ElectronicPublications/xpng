@@ -1,3 +1,10 @@
+`ORG.IPEP:`
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/ImageProcessing-ElectronicPublications/xpng)
+![GitHub Release Date](https://img.shields.io/github/release-date/ImageProcessing-ElectronicPublications/xpng)
+![GitHub repo size](https://img.shields.io/github/repo-size/ImageProcessing-ElectronicPublications/xpng)
+![GitHub all releases](https://img.shields.io/github/downloads/ImageProcessing-ElectronicPublications/xpng/total)
+![GitHub](https://img.shields.io/github/license/ImageProcessing-ElectronicPublications/xpng)  
+
 # XPNG
 Program to lossily compress PNG images using adaptive quantization.
 
@@ -16,7 +23,7 @@ Apply a png optimizer afterwards for full compression.
 ## Compiling
 Requires libpng and zlib.
 
-Compile with `gcc main.c -o xpng -lpng`
+Compile with `make` or `gcc xpng.c -o xpng -lpng -lm`
 
 ## Sample Images
 Here is a diverse suite of test images fromm the [Kodak Image Suite](http://r0k.us/graphics/kodak/). Both original and compressed versions were run through PNGGauntlet for an optimized apples to apples comparison. A comprssion level of 6 was used. The compressed image follows the original.
