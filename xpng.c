@@ -10,6 +10,8 @@
 #include <math.h>
 #include <stdint.h>
 
+#define XPNG_VERSION "1.2"
+
 int16_t byteclamp16_t(int16_t c)
 {
     int16_t buff[3] = {0, c, 255};
@@ -89,13 +91,12 @@ png_byte pix_paeth(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
     return base;
 }
 
-/* Calculates noisiness - used for adaptive quantization */
-/*
-png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data)
+/* Blured images: Ib = M(I, w, w); w - window (+-) radius */
+png_byte pix_blur(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data)
 {
-    int16_t err = 0, d;
+    int16_t M = 0;
     int32_t ii, jj, N = 0;
-    int64_t p, M, X = 0, X2 = 0;
+    int64_t p, X = 0;
 
     for (ii = i - radius; ii <= i + radius; ii++)
         for (jj = j - radius; jj <= j + radius; jj++)
@@ -103,96 +104,62 @@ png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, i
             {
                 p = *pix(ii, jj, c, w, data);
                 X += p;
+                N++;
+            }
+    M = (N > 0) ? (X / N) : *pix(i, j, c, w, data);
+    M = byteclamp16_t(M);
+    return M;
+}
+
+/* Calculates noisiness - used for adaptive quantization
+ * i = I - Ib; Ib - blur area
+ * e = Sum(i*i) / n - M(i)*M(i);
+ *  */
+png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data, png_bytep blur)
+{
+    int16_t err = 0;
+    int32_t ii, jj, N = 0;
+    int64_t p, b, X = 0, X2 = 0;
+
+    for (ii = i - radius; ii <= i + radius; ii++)
+        for (jj = j - radius; jj <= j + radius; jj++)
+            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
+            {
+                p = *pix(ii, jj, c, w, data);
+                b = *pix(ii, jj, c, w, blur);
+                p -= b;
+                X += p;
                 X2 += p * p;
                 N++;
             }
-    M = X / N;
-    err = sqrt((X2 - X * M) / (N - 1));
-    err = byteclamp16_t(err);
+    if (N > 0)
+    {
+        X /= N;
+        X2 /= N;
+        err = sqrt(X2 - X * X);
+        err = byteclamp16_t(err);
+    }
     return err;
-}
-*/
-png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data)
-{
-    int16_t err = 0, erq = 0;
-    int32_t ii, jj, N1 = 0, N2 = 0, N3 = 0, N4 = 0, N = 0;
-    int64_t p, M = 0, MS = 0, X = 0, X1 = 0, X2 = 0, X3 = 0, X4 = 0, XS = 0;
-
-    for (ii = i - radius; ii <= i; ii++)
-        for (jj = j - radius; jj <= j; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                X1 += p;
-                XS += p * p;
-                N1++;
-            }
-    N += N1;
-    X += X1;
-    X1 /= N1;
-    MS += X1 * X1;
-    M += X1;
-    for (ii = i; ii <= i + radius; ii++)
-        for (jj = j - radius; jj <= j; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                X2 += p;
-                XS += p * p;
-                N2++;
-            }
-    N += N2;
-    X += X2;
-    X2 /= N2;
-    MS += X2 * X2;
-    M += X2;
-    for (ii = i - radius; ii <= i; ii++)
-        for (jj = j; jj <= j + radius; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                X3 += p;
-                XS += p * p;
-                N3++;
-            }
-    N += N3;
-    X += X3;
-    X3 /= N3;
-    MS += X3 * X3;
-    M += X3;
-    for (ii = i; ii <= i + radius; ii++)
-        for (jj = j; jj <= j + radius; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                X4 += p;
-                XS += p * p;
-                N4++;
-            }
-    N += N4;
-    X += X4;
-    X4 /= N4;
-    MS += X4 * X4;
-    M += X4;
-    M /= 4;
-    err = sqrt(XS / N - M * M);
-    err = byteclamp16_t(err);
-    erq = sqrt(MS / 4 - M * M);
-    erq = byteclamp16_t(erq);
-    return ((err > erq) ? (err - erq) : 0);
 }
 
 int main(int argc, const char **argv)
 {
     uint8_t c, d, delta, clevel = 32;
     uint16_t jumpsize, qlevel;
-    int32_t h, w, i, j, refdist, radius = 1;
+    int32_t h, w, i, j, refdist, radius = 2;
     uint64_t f, freq[256] = {};
     size_t rd;
 
+    png_bytep buffer; /* Buffer for original image */
+    png_bytep buffer2; /* Output image buffer */
+    png_bytep diff; /* Residuals from predictor */
+    png_bytep blur; /* Blured image */
+    png_bytep noise; /* Local noisiness */
+
     if (argc < 3)
     {
-        fprintf(stderr, "xpng: usage: xpng inputfile outputfile [level=32, {0..255}] [radius=1, {1..16}]\n");
+        fprintf(stderr, "XPNG version %s (lossy PNG encoder)\n", XPNG_VERSION);
+        fprintf(stderr, "xpng: usage: xpng inputfile outputfile [level=%d, {0..255}] [radius=%d, {1..16}]\n", clevel, radius);
         exit(1);
     }
     if (argc > 3) clevel = atoi(argv[3]);
@@ -207,8 +174,8 @@ int main(int argc, const char **argv)
         fprintf(stderr, "xpng: error: radius=%d ! {1..16}]\n", radius);
         exit(1);
     }
-    qlevel = clevel;    
-    qlevel = sqrt(qlevel * 256);
+    qlevel = clevel;
+    qlevel = sqrt(qlevel * 256 * 256);
     png_image image; /* The control structure used by libpng */
 
     /* Initialize png_image structure */
@@ -222,18 +189,13 @@ int main(int argc, const char **argv)
         exit (1);
     }
 
-    png_bytep buffer; /* Buffer for original image */
-    png_bytep buffer2; /* Output image buffer */
-    png_bytep diff; /* Residuals from predictor */
-    png_bytep noise; /* Local noisiness */
-
     image.format = PNG_FORMAT_RGB;
 
     buffer = malloc(PNG_IMAGE_SIZE(image));
     buffer2 = malloc(PNG_IMAGE_SIZE(image));
     diff = malloc(PNG_IMAGE_SIZE(image));
+    blur = malloc(PNG_IMAGE_SIZE(image));
     noise = malloc(PNG_IMAGE_SIZE(image));
-
 
     if (buffer == NULL || buffer2 == NULL || diff == NULL || noise == NULL)
     {
@@ -261,7 +223,15 @@ int main(int argc, const char **argv)
         for (j = 0; j < w; j++)
             for (c = 0; c < 3; c++)
             {
-                noise[rd] = pix_calc_noise(i,j,c,h,w,radius,buffer);
+                blur[rd] = pix_blur(i,j,c,h,w,radius,buffer);
+                rd++;
+            }
+    rd = 0;
+    for (i = 0; i < h; i++)
+        for (j = 0; j < w; j++)
+            for (c = 0; c < 3; c++)
+            {
+                noise[rd] = pix_calc_noise(i,j,c,h,w,radius,buffer,blur);
                 rd++;
             }
 
@@ -294,7 +264,7 @@ int main(int argc, const char **argv)
                 }
 
                 /* Calculate tolerance using comp. level and local noise */
-                delta = (qlevel + (uint16_t) *pix(i,j,c,w,noise) * 16 * qlevel / (127 + qlevel)) / 16;
+                delta = (qlevel + (uint32_t) *pix(i,j,c,w,noise) * 256 * qlevel / (2047 + qlevel)) / 256;
 
                 /* Calculate interval based on tolerance */
                 png_byte ltarget = (target > delta) ? (target - delta) : 0;
@@ -340,11 +310,16 @@ int main(int argc, const char **argv)
             }
         }
     }
+    free(buffer);
+    free(diff);
+    free(blur);
+    free(noise);
     if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
                                 buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
     {
         fprintf(stderr, "xpng: error: %s\n", image.message);
         exit (1);
     }
+    free(buffer2);
     exit(0);
 }
