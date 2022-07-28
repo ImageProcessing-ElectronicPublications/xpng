@@ -16,7 +16,7 @@ The nonlinear formula for allowable error at each compression and noise level wa
 The program ended up being similar to [lossypng](https://github.com/foobaz/lossypng), but the adaptive quantization used in xpng makes it better at low compression levels (achieving compression ratios of 5-10 compared to raw without significant visual artifacts, as shown in the sample images below). This minimal-artifact compression ratio of 5-10 for XPNG compares with roughly 15-20 for JPEG. However, XPNG performs much better than JPEG on images containing a mixture of photography and text or line art.
 
 ## Usage
-`xpng inputfile.png outputfile.png compressionlevel` (compression level is a number from 0-40, with a typical value of 6)
+`xpng inputfile.png outputfile.png [compressionlevel] [radius]` (compression level is a number from 0-255, with a typical value of 32(default), radius noise is a number from 1-16, with a typical value of 1(default))
 
 Apply a png optimizer afterwards for full compression.
 
