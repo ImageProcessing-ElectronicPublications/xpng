@@ -7,11 +7,11 @@ TARGET = xpng
 
 all: $(TARGET)
 
-$(TARGET): $(TARGET).o
+$(TARGET): src/$(TARGET).o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LIBS) -o $@
 
-$(TARGET).o: $(TARGET).c
+src/$(TARGET).o: src/$(TARGET).c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	$(RM) $(TARGET) $(TARGET).o
+	$(RM) $(TARGET) src/$(TARGET).o

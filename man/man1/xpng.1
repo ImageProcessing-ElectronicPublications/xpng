@@ -1,0 +1,38 @@
+.TH "XPNG" 1 "1.3" "30 Jul 2022" "User Manual"
+
+.SH NAME
+xpng
+
+.SH DESCRIPTION
+Lossy PNG compression with adaptive quantization
+
+.SH SYNOPSIS
+xpng input.png output.png [level] [radius]
+
+.SH PARAMETRS
+.TP
+input.png
+This is the file name of the input image.
+.TP
+output.png
+This is the file name of the output image.
+.TP
+level
+compression level is a number from 0-255, with a typical value of 32(default)
+.TP
+radius
+radius noise is a number from 1-16, with a typical value of 2(default)
+
+.SH EXAMPLE
+xpng sample.png sample.x.png
+
+.SH COPYRIGHT
+Copyright 2017 Ummon Karpe Equationist.
+ All rights reserved.
+
+.SH SEE ALSO
+ pnginfo(1), pngcheck(1), pngquadtree(1), pngmcposterize(1).
+
+.SH CONTACTS
+ Website: https://github.com/Equationist/xpng
+ Autors: Ummon Karpe Equationist (https://github.com/Equationist)

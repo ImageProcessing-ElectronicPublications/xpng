@@ -9,8 +9,7 @@
 #include <zlib.h>
 #include <math.h>
 #include <stdint.h>
-
-#define XPNG_VERSION "1.2"
+#include "xpng.h"
 
 int16_t byteclamp16_t(int16_t c)
 {
@@ -96,17 +95,21 @@ png_byte pix_blur(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t
 {
     int16_t M = 0;
     int32_t ii, jj, N = 0;
-    int64_t p, X = 0;
+    int64_t p0, p, X = 0;
 
+    p0 = *pix(i, j, c, w, data);
     for (ii = i - radius; ii <= i + radius; ii++)
-        for (jj = j - radius; jj <= j + radius; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                X += p;
-                N++;
-            }
-    M = (N > 0) ? (X / N) : *pix(i, j, c, w, data);
+        if ((ii >= 0) && (ii < h))
+            for (jj = j - radius; jj <= j + radius; jj++)
+                if ((jj >= 0) && (jj < w))
+                {
+                    p = *pix(ii, jj, c, w, data);
+                    X += p;
+                    N++;
+                }
+    X -= p0;
+    N--;
+    M = (N > 0) ? (X / N) : p0;
     M = byteclamp16_t(M);
     return M;
 }
@@ -149,17 +152,17 @@ int main(int argc, const char **argv)
     int32_t h, w, i, j, refdist, radius = 2;
     uint64_t f, freq[256] = {};
     size_t rd;
+    png_byte base, target, ltarget, rtarget, approx, a;
 
     png_bytep buffer; /* Buffer for original image */
     png_bytep buffer2; /* Output image buffer */
     png_bytep diff; /* Residuals from predictor */
-    png_bytep blur; /* Blured image */
     png_bytep noise; /* Local noisiness */
 
     if (argc < 3)
     {
         fprintf(stderr, "XPNG version %s (lossy PNG encoder)\n", XPNG_VERSION);
-        fprintf(stderr, "xpng: usage: xpng inputfile outputfile [level=%d, {0..255}] [radius=%d, {1..16}]\n", clevel, radius);
+        fprintf(stderr, "Usage: %s input.png output.png [level=%d, {0..255}] [radius=%d, {1..16}]\n", argv[0], clevel, radius);
         exit(1);
     }
     if (argc > 3) clevel = atoi(argv[3]);
@@ -194,7 +197,6 @@ int main(int argc, const char **argv)
     buffer = malloc(PNG_IMAGE_SIZE(image));
     buffer2 = malloc(PNG_IMAGE_SIZE(image));
     diff = malloc(PNG_IMAGE_SIZE(image));
-    blur = malloc(PNG_IMAGE_SIZE(image));
     noise = malloc(PNG_IMAGE_SIZE(image));
 
     if (buffer == NULL || buffer2 == NULL || diff == NULL || noise == NULL)
@@ -223,7 +225,7 @@ int main(int argc, const char **argv)
         for (j = 0; j < w; j++)
             for (c = 0; c < 3; c++)
             {
-                blur[rd] = pix_blur(i,j,c,h,w,radius,buffer);
+                diff[rd] = pix_blur(i,j,c,h,w,radius,buffer);
                 rd++;
             }
     rd = 0;
@@ -231,7 +233,7 @@ int main(int argc, const char **argv)
         for (j = 0; j < w; j++)
             for (c = 0; c < 3; c++)
             {
-                noise[rd] = pix_calc_noise(i,j,c,h,w,radius,buffer,blur);
+                noise[rd] = pix_calc_noise(i,j,c,h,w,radius,buffer,diff);
                 rd++;
             }
 
@@ -248,9 +250,6 @@ int main(int argc, const char **argv)
         {
             for (c = 0; c < 3; c++)
             {
-                png_byte target; /* Target value */
-                png_byte base; /* Output from predictor */
-
                 /* Left predictor for first row, avg. for others */
                 if (i == 0 && j > 0)
                 {
@@ -267,17 +266,17 @@ int main(int argc, const char **argv)
                 delta = (qlevel + (uint32_t) *pix(i,j,c,w,noise) * 256 * qlevel / (2047 + qlevel)) / 256;
 
                 /* Calculate interval based on tolerance */
-                png_byte ltarget = (target > delta) ? (target - delta) : 0;
-                png_byte rtarget = ((255 - target) > delta) ? (target + delta) : 255;
+                ltarget = (target > delta) ? (target - delta) : 0;
+                rtarget = ((255 - target) > delta) ? (target + delta) : 255;
 
                 /* Find best quantization within allowable tolerance */
                 *pix(i,j,c,w,buffer2) = target;
-                png_byte approx = target;
+                approx = target;
                 f = 0;
-                png_byte a = ltarget;
+                a = ltarget;
                 do
                 {
-                    d = (png_byte)a-(png_byte)base;
+                    d = a-base;
                     if (freq[d] > f)
                     {
                         approx = a;
@@ -312,7 +311,6 @@ int main(int argc, const char **argv)
     }
     free(buffer);
     free(diff);
-    free(blur);
     free(noise);
     if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
                                 buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
