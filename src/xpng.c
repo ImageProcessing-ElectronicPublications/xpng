@@ -1,14 +1,6 @@
 /* gcc xpng.c -o xpng -lpng -lm*/
 /* Requires libpng and zlib */
 
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <png.h>
-#include <zlib.h>
-#include <math.h>
-#include <stdint.h>
 #include "xpng.h"
 
 int16_t byteclamp16_t(int16_t c)
@@ -145,79 +137,33 @@ png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, i
     return err;
 }
 
-int main(int argc, const char **argv)
+png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t clevel, int32_t radius)
 {
-    uint8_t c, d, delta, clevel = 32;
+    uint8_t c, d, delta;
     uint16_t jumpsize, qlevel;
-    int32_t h, w, i, j, refdist, radius = 2;
+    int32_t i, j, refdist;
     uint64_t f, freq[256] = {};
     size_t rd;
     png_byte base, target, ltarget, rtarget, approx, a;
 
-    png_bytep buffer; /* Buffer for original image */
     png_bytep buffer2; /* Output image buffer */
     png_bytep diff; /* Residuals from predictor */
     png_bytep noise; /* Local noisiness */
 
-    if (argc < 3)
-    {
-        fprintf(stderr, "XPNG version %s (lossy PNG encoder)\n", XPNG_VERSION);
-        fprintf(stderr, "Usage: %s input.png output.png [level=%d, {0..255}] [radius=%d, {1..16}]\n", argv[0], clevel, radius);
-        exit(1);
-    }
-    if (argc > 3) clevel = atoi(argv[3]);
-    if (clevel > 255)
-    {
-        fprintf(stderr, "xpng: error: level=%d ! {0..255}]\n", clevel);
-        exit(1);
-    }
-    if (argc > 4) radius = atoi(argv[4]);
-    if (radius < 1 || radius > 16)
-    {
-        fprintf(stderr, "xpng: error: radius=%d ! {1..16}]\n", radius);
-        exit(1);
-    }
     qlevel = clevel;
     qlevel = sqrt(qlevel * 256 * 256);
-    png_image image; /* The control structure used by libpng */
 
-    /* Initialize png_image structure */
-    memset(&image, 0, (sizeof image));
-    image.version = PNG_IMAGE_VERSION;
-
-    /* The first argument is the input file */
-    if (png_image_begin_read_from_file(&image, argv[1]) == 0)
-    {
-        fprintf(stderr, "xpng: error: %s\n", image.message);
-        exit (1);
-    }
-
-    image.format = PNG_FORMAT_RGB;
-
-    buffer = malloc(PNG_IMAGE_SIZE(image));
-    buffer2 = malloc(PNG_IMAGE_SIZE(image));
-    diff = malloc(PNG_IMAGE_SIZE(image));
-    noise = malloc(PNG_IMAGE_SIZE(image));
+    buffer2 = malloc(pngsize);
+    diff = malloc(pngsize);
+    noise = malloc(pngsize);
 
     if (buffer == NULL || buffer2 == NULL || diff == NULL || noise == NULL)
     {
         fprintf(stderr, "xpng: error: insufficient memory\n");
-        exit(1);
+        return NULL;
     }
 
-    memset(buffer, 0, PNG_IMAGE_SIZE(image));
-    memset(buffer2, 0, PNG_IMAGE_SIZE(image));
-
-    if (buffer == NULL ||
-            png_image_finish_read(&image, NULL/*bg*/, buffer,
-                                  0/*row_stride*/, NULL/*colormap*/) == 0)
-    {
-        fprintf(stderr, "xpng: error: %s\n", image.message);
-        exit (1);
-    }
-
-    h = image.height;
-    w = image.width;
+    memset(buffer2, 0, pngsize);
 
     /* Calculate local noisiness */
     rd = 0;
@@ -309,15 +255,88 @@ int main(int argc, const char **argv)
             }
         }
     }
-    free(buffer);
     free(diff);
     free(noise);
-    if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
-                                buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
+
+    return buffer2;
+}
+
+int main(int argc, const char **argv)
+{
+    uint8_t clevel = 32;
+    int32_t h, w, radius = 2;
+    size_t pngsize;
+
+    png_image image; /* The control structure used by libpng */
+    png_bytep buffer; /* Buffer for original image */
+    png_bytep buffer2; /* Output image buffer */
+
+    if (argc < 3)
+    {
+        fprintf(stderr, "XPNG version %s (lossy PNG encoder)\n", XPNG_VERSION);
+        fprintf(stderr, "Usage: %s input.png output.png [level=%d, {0..255}] [radius=%d, {1..16}]\n", argv[0], clevel, radius);
+        exit(1);
+    }
+    if (argc > 3) clevel = atoi(argv[3]);
+    if (clevel > 255)
+    {
+        fprintf(stderr, "xpng: error: level=%d ! {0..255}]\n", clevel);
+        exit(1);
+    }
+    if (argc > 4) radius = atoi(argv[4]);
+    if (radius < 1 || radius > 16)
+    {
+        fprintf(stderr, "xpng: error: radius=%d ! {1..16}]\n", radius);
+        exit(1);
+    }
+
+    /* Initialize png_image structure */
+    memset(&image, 0, (sizeof image));
+    image.version = PNG_IMAGE_VERSION;
+
+    /* The first argument is the input file */
+    if (png_image_begin_read_from_file(&image, argv[1]) == 0)
     {
         fprintf(stderr, "xpng: error: %s\n", image.message);
         exit (1);
     }
-    free(buffer2);
+
+    image.format = PNG_FORMAT_RGB;
+    pngsize = PNG_IMAGE_SIZE(image);
+    buffer = malloc(pngsize);
+
+    if (buffer == NULL)
+    {
+        fprintf(stderr, "xpng: error: insufficient memory\n");
+        exit(1);
+    }
+    memset(buffer, 0, PNG_IMAGE_SIZE(image));
+
+    if (buffer == NULL ||
+            png_image_finish_read(&image, NULL/*bg*/, buffer,
+                                  0/*row_stride*/, NULL/*colormap*/) == 0)
+    {
+        fprintf(stderr, "xpng: error: %s\n", image.message);
+        exit (1);
+    }
+
+    h = image.height;
+    w = image.width;
+
+    buffer2 = xpng(buffer, w, h, pngsize, clevel, radius);
+
+    free(buffer);
+
+    if (buffer2 != NULL)
+    {
+        if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
+                                    buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
+        {
+            fprintf(stderr, "xpng: error: %s\n", image.message);
+            exit (1);
+        }
+        free(buffer2);
+    }
+
     exit(0);
 }
