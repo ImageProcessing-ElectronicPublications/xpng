@@ -1,6 +1,6 @@
 CC ?= cc
 CFLAGS ?= -Wall
-LIBS = -lpng -lm
+LIBS = -lpng -lz -lm
 LDFLAGS ?= -s
 RM = rm -f
 TARGET = xpng

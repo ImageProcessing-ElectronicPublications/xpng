@@ -23,7 +23,7 @@ Apply a png optimizer afterwards for full compression.
 ## Compiling
 Requires libpng and zlib.
 
-Compile with `make` or `gcc xpng.c -o xpng -lpng -lm`
+Compile with `make` or `gcc xpng.c -o xpng -lpng -lz -lm`
 
 ## Sample Images
 Here is a diverse suite of test images fromm the [Kodak Image Suite](http://r0k.us/graphics/kodak/). Both original and compressed versions were run through PNGGauntlet for an optimized apples to apples comparison. A comprssion level of 6 was used. The compressed image follows the original.

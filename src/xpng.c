@@ -1,4 +1,4 @@
-/* gcc xpng.c -o xpng -lpng -lm*/
+/* gcc xpng.c -o xpng -lpng -lz -lm*/
 /* Requires libpng and zlib */
 
 #include "xpng.h"
@@ -9,10 +9,16 @@ int16_t byteclamp16_t(int16_t c)
     return buff[ (int)(c > 0) + (int)(c > 255) ];
 }
 
+int32_t byteclamp32_t(int32_t c, int32_t a, int32_t b)
+{
+    int32_t buff[3] = {a, c, b};
+    return buff[ (int)(c > a) + (int)(c > b) ];
+}
+
 /* Returns pointer to a certain address in a 24 bit datafield */
 png_bytep pix(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
 {
-    return &(data[i*w*3+j*3+c]);
+    return &(data[(i*w+j)*XPNG_BPP+c]);
 }
 
 /* Returns the difference between two bytes for error calculation */
@@ -26,8 +32,12 @@ uint8_t pix_err(png_byte x1, png_byte x2)
 png_byte pix_avg(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
 {
     int16_t p;
-    png_byte left = (j > 0) ? *pix(i,j-1,c,w,data) : 0;
-    png_byte up = (i > 0) ? *pix(i-1,j,c,w,data) : 0;
+    int32_t ip, jp;
+    png_byte left, up;
+    ip = (i > 0) ? (i - 1) : 0;
+    jp = (j > 0) ? (j - 1) : 0;
+    left = *pix(i,jp,c,w,data);
+    up = *pix(ip,j,c,w,data);
 
     p = up;
     p += left;
@@ -35,47 +45,39 @@ png_byte pix_avg(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
     return p;
 }
 
-/* Top predictor for PNG - unused */
-png_byte pix_top(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
-{
-    return ((i > 0) ? *pix(i-1,j,c,w,data) : 0);
-}
-
-/* Left predictor for PNG - used in first row */
-png_byte pix_sub(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
-{
-    return ((j > 0) ? *pix(i,j-1,c,w,data) : 0);
-}
-
 /* Paeth predictor for PNG - unused */
 png_byte pix_paeth(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
 {
-    uint8_t dist = 0;
+    uint8_t dist = 0, perr;
     int16_t p;
+    int32_t ip, jp;
+    png_byte left, up, topleft, base;
+    ip = (i > 0) ? (i - 1) : 0;
+    jp = (j > 0) ? (j - 1) : 0;
 
-    png_byte left = (j > 0) ? *pix(i,j-1,c,w,data) : 0;
-    png_byte up = (i > 0) ? *pix(i-1,j,c,w,data) : 0;
-    png_byte topleft = (i > 0 && j > 0) ? *pix(i-1,j-1,c,w,data) : 0;
+    left = *pix(i,jp,c,w,data);
+    up = *pix(ip,j,c,w,data);
+    topleft = *pix(ip,jp,c,w,data);
 
     p = left;
     p += up;
     p -= topleft;
     p = byteclamp16_t(p);
 
-    png_byte base;
-
     base = left;
-    dist = pix_err((png_byte) p, left);
+    dist = pix_err((png_byte)p, left);
 
-    if (pix_err((png_byte) p, up) < dist)
+    perr = pix_err((png_byte)p, up);
+    if (perr < dist)
     {
-        dist = pix_err((png_byte) p, up);
+        dist = perr;
         base = up;
     }
 
-    if (pix_err((png_byte) p, topleft) < dist)
+    perr = pix_err((png_byte)p, topleft);
+    if (perr < dist)
     {
-        dist = pix_err((png_byte) p, topleft);
+        dist = perr;
         base = topleft;
     }
 
@@ -86,19 +88,21 @@ png_byte pix_paeth(int32_t i, int32_t j, uint8_t c, int32_t w, png_bytep data)
 png_byte pix_blur(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data)
 {
     int16_t M = 0;
-    int32_t ii, jj, N = 0;
+    int32_t ii, jj, ir, jr, N = 0;
     int64_t p0, p, X = 0;
 
     p0 = *pix(i, j, c, w, data);
     for (ii = i - radius; ii <= i + radius; ii++)
-        if ((ii >= 0) && (ii < h))
-            for (jj = j - radius; jj <= j + radius; jj++)
-                if ((jj >= 0) && (jj < w))
-                {
-                    p = *pix(ii, jj, c, w, data);
-                    X += p;
-                    N++;
-                }
+    {
+        ir = byteclamp32_t(ii, 0, h-1);
+        for (jj = j - radius; jj <= j + radius; jj++)
+        {
+            jr = byteclamp32_t(jj, 0, w-1);
+            p = *pix(ir, jr, c, w, data);
+            X += p;
+            N++;
+        }
+    }
     X -= p0;
     N--;
     M = (N > 0) ? (X / N) : p0;
@@ -110,23 +114,26 @@ png_byte pix_blur(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t
  * i = I - Ib; Ib - blur area
  * e = Sum(i*i) / n - M(i)*M(i);
  *  */
-png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data, png_bytep blur)
+png_byte pix_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, int32_t radius, png_bytep data, png_bytep blur)
 {
     int16_t err = 0;
-    int32_t ii, jj, N = 0;
+    int32_t ii, jj, ir, jr, N = 0;
     int64_t p, b, X = 0, X2 = 0;
 
     for (ii = i - radius; ii <= i + radius; ii++)
+    {
+        ir = byteclamp32_t(ii, 0, h-1);
         for (jj = j - radius; jj <= j + radius; jj++)
-            if (ii >= 0 && ii < h && jj >= 0 && jj < w)
-            {
-                p = *pix(ii, jj, c, w, data);
-                b = *pix(ii, jj, c, w, blur);
-                p -= b;
-                X += p;
-                X2 += p * p;
-                N++;
-            }
+        {
+            jr = byteclamp32_t(jj, 0, w-1);
+            p = *pix(ir, jr, c, w, data);
+            b = *pix(ir, jr, c, w, blur);
+            p -= b;
+            X += p;
+            X2 += p * p;
+            N++;
+        }
+    }
     if (N > 0)
     {
         X /= N;
@@ -137,7 +144,7 @@ png_byte pix_calc_noise(int32_t i, int32_t j, uint8_t c, int32_t h, int32_t w, i
     return err;
 }
 
-png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t clevel, int32_t radius)
+void xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t clevel, int32_t radius)
 {
     uint8_t c, d, delta;
     uint16_t jumpsize, qlevel;
@@ -146,30 +153,26 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
     size_t rd;
     png_byte base, target, ltarget, rtarget, approx, a;
 
-    png_bytep buffer2; /* Output image buffer */
     png_bytep diff; /* Residuals from predictor */
     png_bytep noise; /* Local noisiness */
 
     qlevel = clevel;
     qlevel = sqrt(qlevel * 256 * 256);
 
-    buffer2 = malloc(pngsize);
     diff = malloc(pngsize);
     noise = malloc(pngsize);
 
-    if (buffer == NULL || buffer2 == NULL || diff == NULL || noise == NULL)
+    if (buffer == NULL || diff == NULL || noise == NULL)
     {
         fprintf(stderr, "xpng: error: insufficient memory\n");
-        return NULL;
+        return;
     }
-
-    memset(buffer2, 0, pngsize);
 
     /* Calculate local noisiness */
     rd = 0;
     for (i = 0; i < h; i++)
         for (j = 0; j < w; j++)
-            for (c = 0; c < 3; c++)
+            for (c = 0; c < XPNG_BPP; c++)
             {
                 diff[rd] = pix_blur(i,j,c,h,w,radius,buffer);
                 rd++;
@@ -177,9 +180,9 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
     rd = 0;
     for (i = 0; i < h; i++)
         for (j = 0; j < w; j++)
-            for (c = 0; c < 3; c++)
+            for (c = 0; c < XPNG_BPP; c++)
             {
-                noise[rd] = pix_calc_noise(i,j,c,h,w,radius,buffer,diff);
+                noise[rd] = pix_noise(i,j,c,h,w,radius,buffer,diff);
                 rd++;
             }
 
@@ -194,19 +197,11 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
         refdist = 1;
         for (j = 0; j < w; j++)
         {
-            for (c = 0; c < 3; c++)
+            for (c = 0; c < XPNG_BPP; c++)
             {
                 /* Left predictor for first row, avg. for others */
-                if (i == 0 && j > 0)
-                {
-                    target = *pix(i,j,c,w,buffer);
-                    base = pix_sub(i,j,c,w,buffer2);
-                }
-                else
-                {
-                    target = *pix(i,j,c,w,buffer);
-                    base = pix_avg(i,j,c,w,buffer2);
-                }
+                target = *pix(i,j,c,w,buffer);
+                base = pix_avg(i,j,c,w,buffer);
 
                 /* Calculate tolerance using comp. level and local noise */
                 delta = (qlevel + (uint32_t) *pix(i,j,c,w,noise) * 256 * qlevel / (2047 + qlevel)) / 256;
@@ -216,7 +211,6 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
                 rtarget = ((255 - target) > delta) ? (target + delta) : 255;
 
                 /* Find best quantization within allowable tolerance */
-                *pix(i,j,c,w,buffer2) = target;
                 approx = target;
                 f = 0;
                 a = ltarget;
@@ -233,22 +227,22 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
 
                 *pix(i,j,c,w,diff) = approx - base;
                 /*freq[*pix(i,j,c,diff)]++;*/
-                *pix(i,j,c,w,buffer2) = approx;
+                *pix(i,j,c,w,buffer) = approx;
 
                 /* Use recent value for runlength encoding if possible */
                 if (pix_err(target,base+*(pix(i,j,c,w,diff)-refdist)) < delta)
                 {
                     *pix(i,j,c,w,diff) = *(pix(i,j,c,w,diff)-refdist);
-                    *pix(i,j,c,w,buffer2) = base + *pix(i,j,c,w,diff);
+                    *pix(i,j,c,w,buffer) = base + *pix(i,j,c,w,diff);
                     continue;
                 }
-                for (rd = 1; rd <= j*3+c && rd <= 4; rd++)
+                for (rd = 1; rd <= (j * XPNG_BPP + c) && rd <= 4; rd++)
                 {
                     if (pix_err(target,base+*(pix(i,j,c,w,diff)-rd)) < delta)
                     {
                         refdist = rd;
                         *pix(i,j,c,w,diff) = *(pix(i,j,c,w,diff)-rd);
-                        *pix(i,j,c,w,buffer2) = base + *pix(i,j,c,w,diff);
+                        *pix(i,j,c,w,buffer) = base + *pix(i,j,c,w,diff);
                         break;
                     }
                 }
@@ -257,8 +251,6 @@ png_bytep xpng(png_bytep buffer, int32_t w, int32_t h, size_t pngsize, uint8_t c
     }
     free(diff);
     free(noise);
-
-    return buffer2;
 }
 
 int main(int argc, const char **argv)
@@ -269,7 +261,6 @@ int main(int argc, const char **argv)
 
     png_image image; /* The control structure used by libpng */
     png_bytep buffer; /* Buffer for original image */
-    png_bytep buffer2; /* Output image buffer */
 
     if (argc < 3)
     {
@@ -323,19 +314,17 @@ int main(int argc, const char **argv)
     h = image.height;
     w = image.width;
 
-    buffer2 = xpng(buffer, w, h, pngsize, clevel, radius);
+    xpng(buffer, w, h, pngsize, clevel, radius);
 
-    free(buffer);
-
-    if (buffer2 != NULL)
+    if (buffer != NULL)
     {
         if (png_image_write_to_file(&image, argv[2], 0/*already_8bit*/,
-                                    buffer2, 0/*row_stride*/, NULL/*colormap*/) == 0)
+                                    buffer, 0/*row_stride*/, NULL/*colormap*/) == 0)
         {
             fprintf(stderr, "xpng: error: %s\n", image.message);
             exit (1);
         }
-        free(buffer2);
+        free(buffer);
     }
 
     exit(0);
